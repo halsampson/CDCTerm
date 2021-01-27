@@ -167,7 +167,7 @@ int main(int argc, char** argv) {
 
   while (1) {
     if (openSerial(comPort)) {
-      printf("Connected to %s:\n", comPort);
+      printf("\nConnected to %s:\n", comPort);
       try {
         while (1) {
           if (_kbhit()) {
