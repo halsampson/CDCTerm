@@ -14,7 +14,7 @@
 
 #pragma comment(lib, "setupAPI.lib")
 
-#if 0
+#if 0  // TODO: watch for USB events instead of polling registry
 
 void handlerProc(DWORD control) { 
   printf("Control %d\n", control);
@@ -92,7 +92,7 @@ const char* lastActiveComPort() {
 }
 
 
-HANDLE hCom;
+HANDLE hCom = 0;
 
 HANDLE openSerial(const char* portName) {
   char portDev[16] = "\\\\.\\";
@@ -153,12 +153,24 @@ int rxRdy(void) {
   return cs.cbInQue;
 }
 
+bool EnableVTMode() { // Handle VT100 terminal sequences  
+  HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (hOut == INVALID_HANDLE_VALUE) return false;
+
+  DWORD dwMode = 0;
+  if (!GetConsoleMode(hOut, &dwMode)) return false;
+
+  dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+  return SetConsoleMode(hOut, dwMode);
+}
 
 int main(int argc, char** argv) {
 #if 0
   HANDLE hDeviceNotify = registerForDeviceEvents();
   printf("watching...");
 #endif
+
+  EnableVTMode();
 
   const char* comPort;
   if (argc > 1)
@@ -187,7 +199,7 @@ int main(int argc, char** argv) {
           }        
         }
       } catch (...) {
-        CloseHandle(hCom);
+        if (hCom) CloseHandle(hCom);
       }
     } else Sleep(500);  // better on USB connect event
   }
