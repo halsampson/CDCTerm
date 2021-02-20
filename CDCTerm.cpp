@@ -212,9 +212,8 @@ int main(int argc, char** argv) {
       try {
         while (1) {
           while (_kbhit()) {
-            unsigned char ch = _getch(); // can't read ^C !! use ReadConsole() ??
+            unsigned char ch = _getch(); 
 
-            if (ch == 24) ch = 3; // ^X -> ^C
             // handle arrow keys: 0 or 0xE0 followed by key code
             if (ch == 0 || ch == 0xE0) {
               ch = _getch();
@@ -237,14 +236,15 @@ int main(int argc, char** argv) {
             case -1: throw("close");
             case 0: Sleep(16); break;
             default :
-              char buf[64 + 1];
+              char buf[64 * 2 + 1]; // two USB buffers
               DWORD bytesRead;
               if (!ReadFile(hCom, buf, sizeof(buf)-1, &bytesRead, NULL)) throw("close");
-              buf[bytesRead] = 0;              
-              while (1) { // remove ^O  at both ends of top lines
+              buf[bytesRead] = 0;      
+
+              while (1) { // remove ^Os  at both ends of  top  lines
                 char* p = strchr(buf, 15);
                 if (!p) break;
-                *p = 0xFF;
+                memmove(p, p + 1, bytesRead + buf - p);  // remove ^O
               }
 
               printf("%s", buf);
