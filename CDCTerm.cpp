@@ -240,7 +240,13 @@ int main(int argc, char** argv) {
               char buf[64 + 1];
               DWORD bytesRead;
               if (!ReadFile(hCom, buf, sizeof(buf)-1, &bytesRead, NULL)) throw("close");
-              buf[bytesRead] = 0;
+              buf[bytesRead] = 0;              
+              while (1) { // remove ^O  at both ends of top lines
+                char* p = strchr(buf, 15);
+                if (!p) break;
+                *p = 0xFF;
+              }
+
               printf("%s", buf);
               break;
           }        
