@@ -92,7 +92,7 @@ const char* lastActiveComPort() {
 }
 
 
-HANDLE hCom = 0;
+HANDLE hCom;
 
 HANDLE openSerial(const char* portName) {
   char portDev[16] = "\\\\.\\";
@@ -159,9 +159,37 @@ bool EnableVTMode() { // Handle VT100 terminal sequences
 
   DWORD dwMode = 0;
   if (!GetConsoleMode(hOut, &dwMode)) return false;
-
-  dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+  dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING; //  | ENABLE_QUICK_EDIT_MODE;
   return SetConsoleMode(hOut, dwMode);
+}
+
+#define KEY_F1         59
+#define KEY_F2         60
+#define KEY_F3         61
+#define KEY_F4         62
+#define KEY_F5         63
+#define KEY_F6         64
+#define KEY_F7         65
+#define KEY_F8         66
+#define KEY_F9         67
+
+#define KEY_HOME       71
+#define KEY_UP         72
+#define KEY_PGUP       73
+#define KEY_LEFT       75
+#define KEY_CENTER     76
+#define KEY_RIGHT      77
+#define KEY_END        79
+#define KEY_DOWN       80
+#define KEY_PGDN       81
+#define KEY_INSERT     82
+#define KEY_DELETE     83
+
+
+BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
+  char ch = 3; // ^C
+  WriteFile(hCom, &ch, 1, NULL, NULL);  
+  return true;
 }
 
 int main(int argc, char** argv) {
@@ -170,6 +198,7 @@ int main(int argc, char** argv) {
   printf("watching...");
 #endif
 
+  SetConsoleCtrlHandler(CtrlHandler, TRUE);  // doesn't work when run under debugger
   EnableVTMode();
 
   const char* comPort;
@@ -182,8 +211,26 @@ int main(int argc, char** argv) {
       printf("\nConnected to %s:\n", comPort);
       try {
         while (1) {
-          if (_kbhit()) {
-            char ch = _getch();
+          while (_kbhit()) {
+            unsigned char ch = _getch(); // can't read ^C !! use ReadConsole() ??
+
+            if (ch == 24) ch = 3; // ^X -> ^C
+            // handle arrow keys: 0 or 0xE0 followed by key code
+            if (ch == 0 || ch == 0xE0) {
+              ch = _getch();
+              switch (ch) { // VT100 Escape sequences 
+                // TODO: more: Delete, PgUp PgDown, ...
+                case KEY_UP :    ch = 'A'; break;
+                case KEY_DOWN :  ch = 'B'; break;
+                case KEY_RIGHT : ch = 'C'; break;
+                case KEY_LEFT :  ch = 'D'; break;
+
+                case KEY_HOME :  ch = 'H'; break;
+                case KEY_END :   ch = 'F'; break;
+              }
+              char CSI[] = "\x1B" "[";
+              WriteFile(hCom, &CSI, 2, NULL, NULL);
+            }
             if (!WriteFile(hCom, &ch, 1, NULL, NULL)) throw("close");
           }
           switch (rxRdy()) {
