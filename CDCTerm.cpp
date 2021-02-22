@@ -213,7 +213,7 @@ void escapeKeys() {
   }
   char CSI[3] = "\x1B" "[";
   CSI[2] = ch;
-  WriteFile(hCom, &CSI, 3, NULL, NULL);
+  if (!WriteFile(hCom, &CSI, 3, NULL, NULL)) throw "close";
 }
 
 
@@ -243,20 +243,18 @@ int main(int argc, char** argv) {
       try {
         while (1) {
           while (_kbhit()) {
-            unsigned char ch = _getch(); 
-
-           
+            unsigned char ch = _getch();           
             if (ch == 0 || ch == 0xE0)
               escapeKeys(); // handle arrow keys: 0 or 0xE0 followed by key code
-            else if (!WriteFile(hCom, &ch, 1, NULL, NULL)) throw("close");
+            else if (!WriteFile(hCom, &ch, 1, NULL, NULL)) throw "close";
           }
           switch (rxRdy()) {
-            case -1: throw("close");
+            case -1: throw "close";
             case 0: Sleep(16); break;
             default :
               char buf[64 * 2 + 1]; // two USB buffers
               DWORD bytesRead;
-              if (!ReadFile(hCom, buf, sizeof(buf)-1, &bytesRead, NULL)) throw("close");
+              if (!ReadFile(hCom, buf, sizeof(buf)-1, &bytesRead, NULL)) throw "close";
               buf[bytesRead] = 0;      
 
               while (1) { // remove ^Os  at both ends of  top  lines
@@ -270,7 +268,7 @@ int main(int argc, char** argv) {
           }        
         }
       } catch (...) {
-        if (hCom) CloseHandle(hCom);
+        if (hCom > 0) CloseHandle(hCom);
       }
     } else Sleep(500);  // better on USB connect event
   }
