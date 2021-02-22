@@ -185,6 +185,28 @@ bool EnableVTMode() { // Handle VT100 terminal sequences
 #define KEY_INSERT     82
 #define KEY_DELETE     83
 
+void escapeKeys() {
+  char ch = _getch();
+  switch (ch) { // VT100 Escape sequences 
+    // TODO: more: PgUp PgDown, ...
+    case KEY_UP:    ch = 'A'; break;
+    case KEY_DOWN:  ch = 'B'; break;
+    case KEY_RIGHT: ch = 'C'; break;
+    case KEY_LEFT:  ch = 'D'; break;
+
+    case KEY_HOME:  ch = 'H'; break;
+    case KEY_END:   ch = 'F'; break;
+
+    case KEY_DELETE: 
+      char del[] = "\x1B" "[C" "\x08"; // right + backspace; (?at end of line?)
+      WriteFile(hCom, &del, 4, NULL, NULL);
+      return;
+  }
+  char CSI[3] = "\x1B" "[";
+  CSI[2] = ch;
+  WriteFile(hCom, &CSI, 3, NULL, NULL);
+}
+
 
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
   char ch = 3; // ^C
@@ -214,23 +236,10 @@ int main(int argc, char** argv) {
           while (_kbhit()) {
             unsigned char ch = _getch(); 
 
-            // handle arrow keys: 0 or 0xE0 followed by key code
-            if (ch == 0 || ch == 0xE0) {
-              ch = _getch();
-              switch (ch) { // VT100 Escape sequences 
-                // TODO: more: Delete, PgUp PgDown, ...
-                case KEY_UP :    ch = 'A'; break;
-                case KEY_DOWN :  ch = 'B'; break;
-                case KEY_RIGHT : ch = 'C'; break;
-                case KEY_LEFT :  ch = 'D'; break;
-
-                case KEY_HOME :  ch = 'H'; break;
-                case KEY_END :   ch = 'F'; break;
-              }
-              char CSI[] = "\x1B" "[";
-              WriteFile(hCom, &CSI, 2, NULL, NULL);
-            }
-            if (!WriteFile(hCom, &ch, 1, NULL, NULL)) throw("close");
+           
+            if (ch == 0 || ch == 0xE0)
+              escapeKeys(); // handle arrow keys: 0 or 0xE0 followed by key code
+            else if (!WriteFile(hCom, &ch, 1, NULL, NULL)) throw("close");
           }
           switch (rxRdy()) {
             case -1: throw("close");
