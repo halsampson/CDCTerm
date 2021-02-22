@@ -188,7 +188,6 @@ bool EnableVTMode() { // Handle VT100 terminal sequences
 void escapeKeys() {
   char ch = _getch();
   switch (ch) { // VT100 Escape sequences 
-    // TODO: more: PgUp PgDown, ...
     case KEY_UP:    ch = 'A'; break;
     case KEY_DOWN:  ch = 'B'; break;
     case KEY_RIGHT: ch = 'C'; break;
@@ -197,9 +196,19 @@ void escapeKeys() {
     case KEY_HOME:  ch = 'H'; break;
     case KEY_END:   ch = 'F'; break;
 
-    case KEY_DELETE: 
-      char del[] = "\x1B" "[C" "\x08"; // right + backspace; (?at end of line?)
-      WriteFile(hCom, &del, 4, NULL, NULL);
+    default :
+      switch (ch) {
+        case KEY_HOME:   ch = '1'; break;
+        case KEY_INSERT: ch = '2'; break;
+        case KEY_DELETE: ch = '3'; break;
+        case KEY_END:    ch = '4'; break;
+        case KEY_PGUP:   ch = '5'; break;
+        case KEY_PGDN:   ch = '6'; break;
+        default : return;
+      }
+      char csi4[] = "\x1B" "[n~";
+      csi4[2] = ch;
+      WriteFile(hCom, &csi4, 4, NULL, NULL);
       return;
   }
   char CSI[3] = "\x1B" "[";
