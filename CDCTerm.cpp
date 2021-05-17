@@ -94,17 +94,19 @@ const char* lastActiveComPort() {
 
 HANDLE hCom;
 
-HANDLE openSerial(const char* portName) {
+HANDLE openSerial(const char* portName, int baudRate = 921600) {
   char portDev[16] = "\\\\.\\";
   strcat_s(portDev, sizeof(portDev), portName);
 
   hCom = CreateFile(portDev, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL); // better OVERLAPPED
   if (hCom == INVALID_HANDLE_VALUE) return NULL;
 
-#if 0 // configure far end bridge COM port:
-  DCB dcb;
+#if 1 // configure far end bridge COM port - only for bridges - could check endpoint capabilites??
+  DCB dcb = { 0 };
   dcb.DCBlength = sizeof(DCB);
-  dcb.BaudRate = 115200;
+  GetCommState(hCom, &dcb);
+
+  dcb.BaudRate = baudRate;
   // PL2303HX:  Divisor = 12 * 1000 * 1000 * 32 / baud --> 12M, 6M, 3M, 2457600, 1228800, 921600, ... baud
   // FTDI 3 MHz / (n + 0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875; where n is an integer between 2 and 16384)
   // Note: special cases n = 0 -> 3 MBaud; n = 1 -> 2 MBaud; Sub-integer divisors between 0 and 2 not allowed.
@@ -126,20 +128,16 @@ HANDLE openSerial(const char* portName) {
   dcb.fOutxCtsFlow = true;
 #endif  
 
-  if (!SetCommState(hCom, &dcb)) {
-    printf("can't set baud ");
-    return NULL;
-  }
+  if (!SetCommState(hCom, &dcb)) {printf("Can't set baud\n"); }
 #endif
-
-  if (!SetupComm(hCom, 16384, 16)) printf("can't SetupComm"); // Set size of I/O buffers (max 16384 on Win7)
+  if (!SetupComm(hCom, 16384, 16)) printf("Can't SetupComm\n"); // Set size of I/O buffers (max 16384 on Win7)
 
   // USB bulk packets arrive at 1 kHz rate
   COMMTIMEOUTS timeouts = { 0 };  // in ms
-  timeouts.ReadIntervalTimeout = 16; // overrides ReadTotalTimeoutConstant after first byte is received
-  timeouts.ReadTotalTimeoutConstant = 16; // only in case of no device response
+  timeouts.ReadIntervalTimeout = 200;
+  timeouts.ReadTotalTimeoutConstant = 16;
   timeouts.ReadTotalTimeoutMultiplier = 0;
-  if (!SetCommTimeouts(hCom, &timeouts))  printf("can't SetCommTimeouts");
+  if (!SetCommTimeouts(hCom, &timeouts))  printf("Can't SetCommTimeouts\n");
 
   return hCom;
 }
@@ -237,8 +235,12 @@ int main(int argc, char** argv) {
     comPort = argv[1];
   else comPort = lastActiveComPort();
 
+  int baudRate = 921600; // or 115200
+  if (argc > 2)
+    baudRate = atoi(argv[2]);
+
   while (1) {
-    if (openSerial(comPort)) {
+    if (openSerial(comPort, baudRate)) {
       printf("\nConnected to %s:\n", comPort);
       try {
         while (1) {
