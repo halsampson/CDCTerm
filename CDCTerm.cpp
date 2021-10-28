@@ -47,6 +47,8 @@ HANDLE registerForDeviceEvents() {
 
 FILETIME prev = {MAXDWORD, MAXDWORD};
 
+char friendlyName[128];
+
 const char* lastActiveComPort() {
   FILETIME latest = { 0 };
   static char comPortName[8] = "none";
@@ -78,9 +80,13 @@ const char* lastActiveComPort() {
         if (CompareFileTime(&lastWritten, &latest) > 0 && CompareFileTime(&lastWritten, &prev) < 0) { // latest device connected
           latest = lastWritten;
           if (strstr(devKeyName, "FTDIBUS")) strcat_s(serNum, sizeof(serNum), "\\0000"); // TODO: enumerate FTDI?
+
+          len = sizeof(friendlyName);
+          RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len);
+
           strcat_s(serNum, sizeof(serNum), "\\Device Parameters");
           len = sizeof(comPortName);
-          RegGetValue(devKey, serNum, "PortName", RRF_RT_REG_SZ, NULL, comPortName, &len);
+          RegGetValue(devKey, serNum, "PortName", RRF_RT_REG_SZ, NULL, comPortName, &len);          
           // SetupDiGetDeviceRegistryProperty(hDevInfo, &DeviceInfoData, SPDRP_FRIENDLYNAME, NULL, (BYTE*)devName, sizeof(devName), NULL);        
         }
       }
@@ -252,16 +258,19 @@ int main(int argc, char** argv) {
     comPort = lastActiveComPort();
 
   while (1) {
-    SetWindowText(GetConsoleWindow(), comPort);
-    printf("\nConnected to %s:\n", comPort);
+    SetWindowText(GetConsoleWindow(), friendlyName);
+    printf("\nConnected to %s:\n", friendlyName);
     try {
       while (1) {
+        unsigned char ch = 0xFF;
         while (_kbhit()) {
-          unsigned char ch = _getch();           
+          ch = _getch();           
           if (ch == 0 || ch == 0xE0)
             escapeKeys(); // handle arrow keys: 0 or 0xE0 followed by key code
           else if (!WriteFile(hCom, &ch, 1, NULL, NULL)) throw "close";
         }
+        if (ch != 0xFF) SetWindowText(GetConsoleWindow(), friendlyName);
+
         switch (rxRdy()) {
           case -1: throw "close";
           case 0: Sleep(16); break;
