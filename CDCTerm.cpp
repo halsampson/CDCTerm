@@ -5,8 +5,8 @@
 // override with command line COMnn
 
 // TODO:
-//  Alt key to switch ports
 //  backspace vs. Del 
+//  Alt key to switch ports (or run another instance)
 
 #include <Windows.h>
 #include <stdio.h>
@@ -66,6 +66,8 @@ const char* lastActiveComPort() {
     char* truncate;
     if ((truncate = strstr(hardwareID, "&REV"))) *truncate = 0;
     if ((truncate = strstr(hardwareID, "\\COMPORT"))) *truncate = 0;  // FTDI 
+    if (strstr(hardwareID, "VID_1CBE")) 
+      strcat_s(hardwareID, sizeof(hardwareID), "&MI_00"); // Stellaris
 
     char devKeyName[256] = "System\\CurrentControlSet\\Enum\\";
     strcat_s(devKeyName, sizeof(devKeyName), hardwareID);
