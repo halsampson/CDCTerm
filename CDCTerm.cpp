@@ -4,6 +4,10 @@
 // defaults to last USB COM port device connected
 // override with command line COMnn
 
+// Alt key to switch ports
+
+// backspace vs. Del 
+
 #include <Windows.h>
 #include <stdio.h>
 #include <conio.h>
@@ -101,17 +105,19 @@ HANDLE openSerial(const char* portName, int baudRate = 921600) {
   hCom = CreateFile(portDev, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL); // better OVERLAPPED
   if (hCom == INVALID_HANDLE_VALUE) return NULL;
 
-#if 1 // configure far end bridge COM port - only for bridges - could check endpoint capabilites??
+ // configure far end bridge COM port - only for bridges - could check endpoint capabilites??
   DCB dcb = { 0 };
   dcb.DCBlength = sizeof(DCB);
   GetCommState(hCom, &dcb);
 
+#if 1
   dcb.BaudRate = baudRate;
   // PL2303HX:  Divisor = 12 * 1000 * 1000 * 32 / baud --> 12M, 6M, 3M, 2457600, 1228800, 921600, ... baud
   // FTDI 3 MHz / (n + 0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875; where n is an integer between 2 and 16384)
   // Note: special cases n = 0 -> 3 MBaud; n = 1 -> 2 MBaud; Sub-integer divisors between 0 and 2 not allowed.
-  dcb.ByteSize = 8;
-  dcb.StopBits = 1;
+
+  dcb.ByteSize = DATABITS_8;
+  dcb.StopBits = 0; // STOPBITS_10;   // BUG in SetCommState or VCP??
   dcb.fBinary = TRUE; // no EOF check
 
 #if 1
@@ -127,9 +133,10 @@ HANDLE openSerial(const char* portName, int baudRate = 921600) {
   dcb.fOutxDsrFlow = true;
   dcb.fOutxCtsFlow = true;
 #endif  
+#endif
+
 
   if (!SetCommState(hCom, &dcb)) {printf("Can't set baud\n"); }
-#endif
   if (!SetupComm(hCom, 16384, 16)) printf("Can't SetupComm\n"); // Set size of I/O buffers (max 16384 on Win7)
 
   // USB bulk packets arrive at 1 kHz rate
@@ -235,12 +242,13 @@ int main(int argc, char** argv) {
     comPort = argv[1];
   else comPort = lastActiveComPort();
 
-  int baudRate = 921600; // or 115200
+  int baudRate = 921600; // or 115200   -- doesn't matter unless bridged
   if (argc > 2)
     baudRate = atoi(argv[2]);
 
   while (1) {
     if (openSerial(comPort, baudRate)) {
+      SetWindowText(GetConsoleWindow(), comPort);
       printf("\nConnected to %s:\n", comPort);
       try {
         while (1) {
