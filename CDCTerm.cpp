@@ -4,9 +4,9 @@
 // defaults to last USB COM port device connected
 // override with command line COMnn
 
-// Alt key to switch ports
-
-// backspace vs. Del 
+// TODO:
+//  Alt key to switch ports
+//  backspace vs. Del 
 
 #include <Windows.h>
 #include <stdio.h>
@@ -45,9 +45,10 @@ HANDLE registerForDeviceEvents() {
 #endif
 
 
-FILETIME latest = { 0 };
+FILETIME prev = {MAXDWORD, MAXDWORD};
 
 const char* lastActiveComPort() {
+  FILETIME latest = { 0 };
   static char comPortName[8] = "none";
   HDEVINFO hDevInfo = SetupDiGetClassDevs(&GUID_CLASS_COMPORT, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
 
@@ -74,7 +75,7 @@ const char* lastActiveComPort() {
         char serNum[64]; DWORD len = sizeof(serNum);
         FILETIME lastWritten = { 0 }; // 100 ns
         if (RegEnumKeyEx(devKey, idx++, serNum, &len, NULL, NULL, NULL, &lastWritten)) break;
-        if (CompareFileTime(&lastWritten, &latest) > 0) { // latest device connected
+        if (CompareFileTime(&lastWritten, &latest) > 0 && CompareFileTime(&lastWritten, &prev) < 0) { // latest device connected
           latest = lastWritten;
           if (strstr(devKeyName, "FTDIBUS")) strcat_s(serNum, sizeof(serNum), "\\0000"); // TODO: enumerate FTDI?
           strcat_s(serNum, sizeof(serNum), "\\Device Parameters");
@@ -87,6 +88,7 @@ const char* lastActiveComPort() {
     } else if (strstr(hardwareID, "USB")) printf("%s not found", devKeyName); // low numbered non-removable ports ignored
   }
 
+  prev = latest;
   SetupDiDestroyDeviceInfoList(hDevInfo);
   return comPortName;
 
@@ -246,41 +248,44 @@ int main(int argc, char** argv) {
   if (argc > 2)
     baudRate = atoi(argv[2]);
 
+  while (!openSerial(comPort, baudRate))
+    comPort = lastActiveComPort();
+
   while (1) {
-    if (openSerial(comPort, baudRate)) {
-      SetWindowText(GetConsoleWindow(), comPort);
-      printf("\nConnected to %s:\n", comPort);
-      try {
-        while (1) {
-          while (_kbhit()) {
-            unsigned char ch = _getch();           
-            if (ch == 0 || ch == 0xE0)
-              escapeKeys(); // handle arrow keys: 0 or 0xE0 followed by key code
-            else if (!WriteFile(hCom, &ch, 1, NULL, NULL)) throw "close";
-          }
-          switch (rxRdy()) {
-            case -1: throw "close";
-            case 0: Sleep(16); break;
-            default :
-              char buf[64 * 2 + 1]; // two USB buffers
-              DWORD bytesRead;
-              if (!ReadFile(hCom, buf, sizeof(buf)-1, &bytesRead, NULL)) throw "close";
-              buf[bytesRead] = 0;      
-
-              while (1) { // remove ^Os  at both ends of  top  lines
-                char* p = strchr(buf, 15);
-                if (!p) break;
-                memmove(p, p + 1, bytesRead + buf - p);  // remove ^O
-              }
-
-              printf("%s", buf);
-              break;
-          }        
+    SetWindowText(GetConsoleWindow(), comPort);
+    printf("\nConnected to %s:\n", comPort);
+    try {
+      while (1) {
+        while (_kbhit()) {
+          unsigned char ch = _getch();           
+          if (ch == 0 || ch == 0xE0)
+            escapeKeys(); // handle arrow keys: 0 or 0xE0 followed by key code
+          else if (!WriteFile(hCom, &ch, 1, NULL, NULL)) throw "close";
         }
-      } catch (...) {
-        if (hCom > 0) CloseHandle(hCom);
+        switch (rxRdy()) {
+          case -1: throw "close";
+          case 0: Sleep(16); break;
+          default :
+            char buf[64 * 2 + 1]; // two USB buffers
+            DWORD bytesRead;
+            if (!ReadFile(hCom, buf, sizeof(buf)-1, &bytesRead, NULL)) throw "close";
+            buf[bytesRead] = 0;      
+
+            while (1) { // remove ^Os  at both ends of  top  lines
+              char* p = strchr(buf, 15);
+              if (!p) break;
+              memmove(p, p + 1, bytesRead + buf - p);  // remove ^O
+            }
+
+            printf("%s", buf);
+            break;
+        }        
       }
-    } else Sleep(500);  // better on USB connect event
+    } catch (...) {
+      if (hCom > 0) CloseHandle(hCom);
+    }
+
+    if (!openSerial(comPort, baudRate)) Sleep(500);  // better on USB reconnect event
   }
 
   // UnregisterDeviceNotification(hDeviceNotify);
