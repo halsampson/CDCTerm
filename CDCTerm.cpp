@@ -259,12 +259,14 @@ int main(int argc, char** argv) {
   while (!openSerial(comPort, baudRate))
     comPort = lastActiveComPort();
 
+  SetWindowText(GetConsoleWindow(), friendlyName);
+  printf("\nConnected to %s:\n", friendlyName);
+
   while (1) {
-    SetWindowText(GetConsoleWindow(), friendlyName);
-    printf("\nConnected to %s:\n", friendlyName);
     try {
       while (1) {
         unsigned char ch = 0xFF;
+        // TODO: long paste is slow: ~1000 cps   better separate threads -- e.g. see PuTTY
         while (_kbhit()) {
           ch = _getch();           
           if (ch == 0 || ch == 0xE0)
