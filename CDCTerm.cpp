@@ -106,7 +106,7 @@ const char* lastActiveComPort() {
 }
 
 
-HANDLE hCom;
+HANDLE hCom = NULL;
 
 HANDLE openSerial(const char* portName, int baudRate = 921600) {
   char portDev[16] = "\\\\.\\";
@@ -144,7 +144,6 @@ HANDLE openSerial(const char* portName, int baudRate = 921600) {
   dcb.fOutxCtsFlow = true;
 #endif  
 #endif
-
 
   if (!SetCommState(hCom, &dcb)) {printf("Can't set baud\n"); }
   if (!SetupComm(hCom, 16384, 16)) printf("Can't SetupComm\n"); // Set size of I/O buffers (max 16384 on Win7)
@@ -200,8 +199,7 @@ bool EnableVTMode() { // Handle VT100 terminal sequences
 #define KEY_INSERT     82
 #define KEY_DELETE     83
 
-void escapeKeys() {
-  char ch = _getch();
+void escapeKeys(char ch) {
   switch (ch) { // VT100 Escape sequences 
     case KEY_UP:    ch = 'A'; break;
     case KEY_DOWN:  ch = 'B'; break;
@@ -231,12 +229,20 @@ void escapeKeys() {
   if (!WriteFile(hCom, &CSI, 3, NULL, NULL)) throw "close";
 }
 
+void processKey() {
+  unsigned char ch = _getch();
+  if (ch == 0 || ch == 0xE0)
+    escapeKeys(_getch()); // handle arrow keys: 0 or 0xE0 followed by key code
+  else if (!WriteFile(hCom, &ch, 1, NULL, NULL)) throw "close";
+}
+
 
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
   char ch = 3; // ^C
   WriteFile(hCom, &ch, 1, NULL, NULL);  
   return true;
 }
+
 
 int main(int argc, char** argv) {
 #if 0
@@ -252,7 +258,7 @@ int main(int argc, char** argv) {
     comPort = argv[1];
   else comPort = lastActiveComPort();
 
-  int baudRate = 921600; // or 115200   -- doesn't matter unless bridged
+  int baudRate = 921600; // 115200   -- doesn't matter unless bridged
   if (argc > 2)
     baudRate = atoi(argv[2]);
 
@@ -262,18 +268,22 @@ int main(int argc, char** argv) {
   SetWindowText(GetConsoleWindow(), friendlyName);
   printf("\nConnected to %s:\n", friendlyName);
 
+  // TODO: better two threads!
+
   while (1) {
     try {
       while (1) {
-        unsigned char ch = 0xFF;
-        // TODO: long paste is slow: ~1000 cps   better separate threads -- e.g. see PuTTY
+        bool typing = false;
         while (_kbhit()) {
-          ch = _getch();           
-          if (ch == 0 || ch == 0xE0)
-            escapeKeys(); // handle arrow keys: 0 or 0xE0 followed by key code
-          else if (!WriteFile(hCom, &ch, 1, NULL, NULL)) throw "close";
+          processKey();
+          if (_kbhit()) { // pasting, not typing; process lines
+            char buf[64 * 2]; // rest of two USB buffers
+            fgets(buf, sizeof(buf)-1, stdin); // to buffer, newline, or end of stream            
+            if (!WriteFile(hCom, buf, (DWORD)strlen(buf), NULL, NULL)) throw "close";
+          }
+          typing = true;
         }
-        if (ch != 0xFF) SetWindowText(GetConsoleWindow(), friendlyName);
+        if (typing) SetWindowText(GetConsoleWindow(), friendlyName);  // restore after select
 
         switch (rxRdy()) {
           case -1: throw "close";
@@ -291,14 +301,18 @@ int main(int argc, char** argv) {
             }
 
             printf("%s", buf);
+            while (_kbhit()) processKey();  // handle escape responses
             break;
         }        
       }
     } catch (...) {
-      if (hCom > 0) CloseHandle(hCom);
+      if (hCom > 0) {
+        CloseHandle(hCom);
+        hCom = 0;
+      }
     }
 
-    if (!openSerial(comPort, baudRate)) Sleep(500);  // better on USB reconnect event
+    while (!openSerial(comPort, baudRate)) Sleep(1000);  // better on USB reconnect event
   }
 
   // UnregisterDeviceNotification(hDeviceNotify);
