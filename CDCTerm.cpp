@@ -48,7 +48,7 @@ HANDLE registerForDeviceEvents() {
 
 FILETIME prev = {MAXDWORD, MAXDWORD};
 
-char friendlyName[128];
+char friendlyName[128], commName[128];
 
 const char* lastActiveComPort() {
   FILETIME latest = { 0 };
@@ -99,6 +99,16 @@ const char* lastActiveComPort() {
 
   prev = latest;
   SetupDiDestroyDeviceInfoList(hDevInfo);
+
+  // move COMxx to start of friendlyName
+  char* comPort = strchr(friendlyName, '(');
+  if (comPort) {
+    strcpy_s(commName, sizeof(commName), comPort+1);
+    *strchr(commName, ')') = ' ';
+    strcat_s(commName, sizeof(commName), friendlyName);
+    *(strchr(commName, '(') - 1) = 0;
+  } else strcpy_s(commName, sizeof(commName), friendlyName);
+
   return comPortName;
 
   // see also HKEY_LOCAL_MACHINE\HARDWARE\DEVICEMAP\SERIALCOMM
@@ -275,11 +285,6 @@ void processComms() {
       }
 
       printf("%s", buf);
-
-      while (_kbhit()) {
-        if (processKey())  // handle escape responses
-          Sleep(1);
-      }
       break;
   }
 }
@@ -306,8 +311,8 @@ int main(int argc, char** argv) {
   while (!openSerial(comPort, baudRate))
     comPort = lastActiveComPort();
 
-  SetWindowText(GetConsoleWindow(), friendlyName);
-  printf("\nConnected to %s:\n", friendlyName);
+  SetWindowText(GetConsoleWindow(), commName);
+  printf("\nConnected to %s\n", commName);
 
   while (1) {
     try {
@@ -325,7 +330,7 @@ int main(int argc, char** argv) {
         }
         setInputEcho(true);
         processComms();
-        if (pasteCount == 1) SetWindowText(GetConsoleWindow(), friendlyName);  // typing: restore title after select
+        if (pasteCount == 1) SetWindowText(GetConsoleWindow(), commName);  // typing: restore title after select
       }
     } catch (...) {
       if (hCom > 0) {
