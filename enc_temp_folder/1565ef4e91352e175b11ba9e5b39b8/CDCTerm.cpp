@@ -1,11 +1,11 @@
 // CDCTerm.cpp
 
-// Simple terminal which auto-(re)connects
-// defaults to last free USB COM port device connected
+// Simple terminal which auto-(re)connects 
+// defaults to last USB COM port device connected
 // override with command line COMnn
-// or run more instances to cycle through ports
 
 // TODO:
+//  first letter of paste not shown
 //  backspace vs. Del 
 //  Alt key to switch ports (or run another instance)
 
