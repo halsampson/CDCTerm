@@ -324,14 +324,14 @@ int main(int argc, char** argv) {
         while (_kbhit()) {
            unsigned char ch = processKey();
            if (!ch)  break; // Escape seq
-           if (ch == '\n') {
+           if (ch <= '\r') {
               ++pasteCount;
               SetWindowText(GetConsoleWindow(), commName);  // typing: restore title after select
            }
 
-          while (++pasteCount >= 2 && _kbhit()) { 
+          while (pasteCount >= 2 && _kbhit()) { 
             // pasting, not typing; process line at a time for speed -> Must CR at end of pasted text!!!
-            if (pasteCount == 2) setInputEcho(false);
+            if (pasteCount++ == 2) setInputEcho(false);
             char buf[64 * 2 + 1]; // two USB buffers
             fgets(buf, sizeof(buf)-1, stdin); // to buffer or newline  
             DWORD len = (DWORD)strlen(buf);
