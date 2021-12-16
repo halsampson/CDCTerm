@@ -330,13 +330,14 @@ int main(int argc, char** argv) {
            }
 
           while (++pasteCount >= 2 && _kbhit()) { 
-            // pasting, not typing; process line at a time for speed -> Must CR at end of pasted text!!!
+            // pasting, not typing; process a line - Must have CR at end of pasted text!!!
             if (pasteCount == 2) setInputEcho(false);
             char buf[64 * 2 + 1]; // two USB buffers
             fgets(buf, sizeof(buf)-1, stdin); // to buffer or newline  
             DWORD len = (DWORD)strlen(buf);
             if (!WriteFile(hCom, buf, len, NULL, NULL)) throw "close";
             processComms();
+            if (buf[len - 1] != '\n' || !strchr(buf, '\n')) break;
           }
         }
         setInputEcho(true);
