@@ -136,6 +136,8 @@ HANDLE openSerial(const char* portName, int baudRate = 921600) {
   // PL2303HX:  Divisor = 12 * 1000 * 1000 * 32 / baud --> 12M, 6M, 3M, 2457600, 1228800, 921600, ... baud
   // FTDI 3 MHz / (n + 0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875; where n is an integer between 2 and 16384)
   // Note: special cases n = 0 -> 3 MBaud; n = 1 -> 2 MBaud; Sub-integer divisors between 0 and 2 not allowed.
+  // CP2102N: 24 MHz / N
+  // CH340: 3, 2, 1.5, 1.2, 1M
 
   dcb.ByteSize = DATABITS_8;
   dcb.StopBits = 0; // STOPBITS_10;   // BUG in SetCommState or VCP??
@@ -220,7 +222,7 @@ bool EnableVTMode() { // Handle VT100 terminal sequences
 #define KEY_INSERT     82
 #define KEY_DELETE     83
 
-void escapeKeys(char ch) {
+void escapeKeys(char ch) {  // for TERM=vt100  ??
   switch (ch) { // VT100 Escape sequences 
     case KEY_UP:    ch = 'A'; break;
     case KEY_DOWN:  ch = 'B'; break;
@@ -266,8 +268,14 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
   return true;
 }
 
+HDC plot;
+int maxX, maxY;
 
 // TODO: better two threads
+
+static bool binMode;
+int x;
+bool binMSB, binVI;
 
 void processComms() {
   switch (rxRdy()) {
@@ -278,6 +286,30 @@ void processComms() {
       DWORD bytesRead;
       if (!ReadFile(hCom, buf, sizeof(buf)-1, &bytesRead, NULL)) throw "close";
       buf[bytesRead] = 0;
+
+      for (DWORD p = 0; p < bytesRead; ++p) {
+        if (binMode) {
+          static int s;
+          if (!binMSB) {
+            s = (unsigned char)buf[p];
+            binMSB = true;
+          } else {
+            s |= (unsigned char)buf[p] << 8;
+            binMSB = false;
+
+            s *= maxY - 8;
+            if (binVI)  // current
+              s >>= 12;  // 1 A max
+            else s >>= 16; // voltage
+
+            SetPixel(plot, x, maxY - s, binVI ? RGB(255, 128, 128) : RGB(128, 255, 128));
+            binVI = !binVI;
+            x++;
+            x %= maxX;
+          }
+        } else binMode = buf[p] == (char)0xB2;
+      }
+      if (binMode) break;
 
       while (1) { // remove ^Os  at both ends of  top  lines
         char* p = strchr(buf, 15);
@@ -296,6 +328,10 @@ int main(int argc, char** argv) {
   HANDLE hDeviceNotify = registerForDeviceEvents();
   printf("watching...");
 #endif
+
+  HWND consoleWnd = GetConsoleWindow();
+  plot = GetDC(consoleWnd);
+  RECT rect;
 
   SetConsoleCtrlHandler(CtrlHandler, TRUE);  // doesn't work when run under debugger
   EnableVTMode();
@@ -322,6 +358,15 @@ int main(int argc, char** argv) {
       while (1) {
         int pasteCount = 0;
         while (_kbhit()) {
+          GetClientRect(consoleWnd, &rect);
+          maxX = rect.right;
+          maxY = rect.bottom;
+          if (binMode) {
+            binMode = binMSB = binVI = false;
+            x = 0;
+            InvalidateRect(consoleWnd, NULL, true);
+          }
+
            unsigned char ch = processKey();
            if (!ch)  break; // Escape seq
            if (ch <= '\r') {
