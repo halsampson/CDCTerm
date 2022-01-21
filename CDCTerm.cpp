@@ -288,9 +288,9 @@ void processComms() {
       if (!ReadFile(hCom, (char*)buf, sizeof(buf)-1, &bytesRead, NULL)) throw "close";
       buf[bytesRead] = 0;
 
+      static int s;
       for (DWORD p = 0; p < bytesRead; ++p) {
         if (binMode) {
-          static int s;
           if (!binMSB) {
             s = buf[p];
             binMSB = true;
@@ -298,9 +298,25 @@ void processComms() {
             s |= buf[p] << 8;
             binMSB = false;
 
-            s *= maxY - 8;
-            s >>= 2 + 12; // voltage
+            if (s == 0xFFFF) {  // terminate binMode
+              binMode = false;
+              binCh = 0;
+              x = 0;
+              printf("%s", buf + p);
+              break;
+            }
 
+            #define NSUM 16  // 4 min : 16 max: 12 bits -> 16 bits
+            #define ADC_MAX 4096L  // ADC12 bits
+            #define LEDmV  3300L   // TODO: LED drop varies with current; tempco?
+            #define REFmV  1960L   // measure on pin 9 VRefOUT
+            #define adc(mV) ((mV - LEDmV) * ADC_MAX * NSUM / REFmV)
+
+            // TODO: send these first or auto-adjust
+            #define max_mV  4300  
+            #define min_mV  4000
+
+            s = (s - adc(min_mV)) * maxY / (adc(max_mV) - adc(min_mV));            
             // TODO: color, gain per binCh
 
             SetPixel(plot, x, maxY - s,  RGB(255, 128, 128));  
@@ -314,7 +330,10 @@ void processComms() {
           }
         }
       }
-      if (binMode) break;
+      if (binMode || s == 0xFFFF) {
+        s = 0;
+        break;
+      }
 
       while (1) { // remove ^Os  at both ends of  top  lines
         unsigned char* p = (unsigned char*)strchr((char*)buf, 15);
@@ -366,19 +385,17 @@ int main(int argc, char** argv) {
           GetClientRect(consoleWnd, &rect);
           maxX = rect.right;
           maxY = rect.bottom;
-          if (binMode) {
-            binMode = binMSB = false;
-            binCh = 0;
+
+          unsigned char ch = processKey();
+          if (!ch)  break; // Escape seq
+          if (ch == ' ') {
+            InvalidateRect(consoleWnd, NULL, true);
             x = 0;
           }
-
-           unsigned char ch = processKey();
-           if (!ch)  break; // Escape seq
-           if (ch == ' ')  InvalidateRect(consoleWnd, NULL, true);
-           if (ch <= '\r') {
-              ++pasteCount;
-              SetWindowText(GetConsoleWindow(), commName);  // typing: restore title after select
-           }
+          if (ch <= '\r') {
+            ++pasteCount;
+            SetWindowText(GetConsoleWindow(), commName);  // typing: restore title after select
+          }
 
           while (pasteCount >= 2 && _kbhit()) { 
             // pasting, not typing; process line at a time for speed -> Must CR at end of pasted text!!!
