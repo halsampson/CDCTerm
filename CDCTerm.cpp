@@ -273,46 +273,51 @@ int maxX, maxY;
 
 // TODO: better two threads
 
-static bool binMode;
+bool binMode;
+int binChs, binCh;
+bool binMSB;
 int x;
-bool binMSB, binVI;
 
 void processComms() {
   switch (rxRdy()) {
     case -1: throw "close";
     case 0: break;
     default:
-      char buf[64 * 2 + 1]; // two USB buffers
+      unsigned char buf[64 * 2 + 1]; // two USB buffers
       DWORD bytesRead;
-      if (!ReadFile(hCom, buf, sizeof(buf)-1, &bytesRead, NULL)) throw "close";
+      if (!ReadFile(hCom, (char*)buf, sizeof(buf)-1, &bytesRead, NULL)) throw "close";
       buf[bytesRead] = 0;
 
       for (DWORD p = 0; p < bytesRead; ++p) {
         if (binMode) {
           static int s;
           if (!binMSB) {
-            s = (unsigned char)buf[p];
+            s = buf[p];
             binMSB = true;
           } else {
-            s |= (unsigned char)buf[p] << 8;
+            s |= buf[p] << 8;
             binMSB = false;
 
             s *= maxY - 8;
-            if (binVI)  // current
-              s >>= 12;  // 1 A max
-            else s >>= 16; // voltage
+            s >>= 2 + 12; // voltage
 
-            SetPixel(plot, x, maxY - s, binVI ? RGB(255, 128, 128) : RGB(128, 255, 128));
-            binVI = !binVI;
-            x++;
-            x %= maxX;
+            // TODO: color, gain per binCh
+
+            SetPixel(plot, x, maxY - s,  RGB(255, 128, 128));  
+            if (++binCh >= binChs) binCh = 0;
+            if (++x >= maxX) x = 0;
           }
-        } else binMode = buf[p] == (char)0xB2;
+        } else {
+          binMode = (buf[p] & 0xF0) == 0xB0;
+          if (binMode) {
+            binChs = buf[p] & 0xF;
+          }
+        }
       }
       if (binMode) break;
 
       while (1) { // remove ^Os  at both ends of  top  lines
-        char* p = strchr(buf, 15);
+        unsigned char* p = (unsigned char*)strchr((char*)buf, 15);
         if (!p) break;
         memmove(p, p + 1, bytesRead + buf - p);  // remove ^O
       }
@@ -362,13 +367,14 @@ int main(int argc, char** argv) {
           maxX = rect.right;
           maxY = rect.bottom;
           if (binMode) {
-            binMode = binMSB = binVI = false;
+            binMode = binMSB = false;
+            binCh = 0;
             x = 0;
-            InvalidateRect(consoleWnd, NULL, true);
           }
 
            unsigned char ch = processKey();
            if (!ch)  break; // Escape seq
+           if (ch == ' ')  InvalidateRect(consoleWnd, NULL, true);
            if (ch <= '\r') {
               ++pasteCount;
               SetWindowText(GetConsoleWindow(), commName);  // typing: restore title after select
