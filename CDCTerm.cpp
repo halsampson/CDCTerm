@@ -222,7 +222,7 @@ bool EnableVTMode() { // Handle VT100 terminal sequences
 #define KEY_INSERT     82
 #define KEY_DELETE     83
 
-void escapeKeys(char ch) {  // for TERM=vt100  ??
+void escapeKeys(unsigned char ch) {  // for TERM=vt100 
   switch (ch) { // VT100 Escape sequences 
     case KEY_UP:    ch = 'A'; break;
     case KEY_DOWN:  ch = 'B'; break;
@@ -231,6 +231,8 @@ void escapeKeys(char ch) {  // for TERM=vt100  ??
 
     case KEY_HOME:  ch = 'H'; break;
     case KEY_END:   ch = 'F'; break;
+
+    case 134: system("cls"); return;  // F12
 
     default :
       switch (ch) {
@@ -273,11 +275,6 @@ int maxX, maxY;
 
 // TODO: better two threads
 
-bool binMode;
-int binChs, binCh;
-bool binMSB;
-int x;
-
 void processComms() {
   switch (rxRdy()) {
     case -1: throw "close";
@@ -288,53 +285,64 @@ void processComms() {
       if (!ReadFile(hCom, (char*)buf, sizeof(buf)-1, &bytesRead, NULL)) throw "close";
       buf[bytesRead] = 0;
 
-      static int s;
+      static int s, minADC, maxADC, x, binChs, binCh;
+      static enum {off, minLSB, minMSB, maxLSB, maxMSB, binLSB, binMSB} binMode;
       for (DWORD p = 0; p < bytesRead; ++p) {
-        if (binMode) {
-          if (!binMSB) {
-            s = buf[p];
-            binMSB = true;
-          } else {
-            s |= buf[p] << 8;
-            binMSB = false;
-
-            if (s == 0xFFFF) {  // terminate binMode
-              binMode = false;
+        switch (binMode) {
+          case off : 
+            if ((buf[p] & 0xF0) == 0xB0) {            
+              binChs = buf[p] & 0xF;
+              binMode = minLSB;
               binCh = 0;
               x = 0;
-              printf("%s", buf + p);
-              break;
             }
+            break;
 
-            #define NSUM 16  // 4 min : 16 max: 12 bits -> 16 bits
-            #define ADC_MAX 4096L  // ADC12 bits
-            #define LEDmV  3300L   // TODO: LED drop varies with current; tempco?
-            #define REFmV  1960L   // measure on pin 9 VRefOUT
-            #define adc(mV) ((mV - LEDmV) * ADC_MAX * NSUM / REFmV)
+          case minLSB:
+            minADC = buf[p];
+            binMode = minMSB;
+            break;
 
-            // TODO: send these first or auto-adjust
-            #define max_mV  4300  
-            #define min_mV  4000
+          case minMSB:
+            minADC |= buf[p] << 8;
+            binMode = maxLSB;
+            break;
 
-            s = (s - adc(min_mV)) * maxY / (adc(max_mV) - adc(min_mV));            
+          case maxLSB:
+            maxADC = buf[p];
+            binMode = maxMSB;
+            break;
+
+          case maxMSB:
+            maxADC |= buf[p] << 8;
+            binMode = binLSB;
+            break;
+
+          case binLSB:
+            s = buf[p];
+            binMode = binMSB;
+            break;
+
+          case binMSB:
+            s |= buf[p] << 8;
+            if (s == 0xFFFF) { // terminate plot
+              binMode = off;
+              printf("%s", buf + p);
+              return;
+            }
+            binMode = binLSB;
             // TODO: color, gain per binCh
-
-            SetPixel(plot, x, maxY - s,  RGB(255, 128, 128));  
-            if (++binCh >= binChs) binCh = 0;
-            if (++x >= maxX) x = 0;
-          }
-        } else {
-          binMode = (buf[p] & 0xF0) == 0xB0;
-          if (binMode) {
-            binChs = buf[p] & 0xF;
-          }
+            s = (s - minADC) * maxY / (maxADC - minADC);
+            SetPixel(plot, x, maxY - s, RGB(255, 128, 128)); 
+            if (++binCh >= binChs) {
+              binCh = 0;
+              if (++x >= maxX) x = 0;
+            }
+            break;
         }
       }
-      if (binMode || s == 0xFFFF) {
-        s = 0;
-        break;
-      }
-
+      if (binMode != off) break;
+      
       while (1) { // remove ^Os  at both ends of  top  lines
         unsigned char* p = (unsigned char*)strchr((char*)buf, 15);
         if (!p) break;
@@ -388,10 +396,7 @@ int main(int argc, char** argv) {
 
           unsigned char ch = processKey();
           if (!ch)  break; // Escape seq
-          if (ch == ' ') {
-            InvalidateRect(consoleWnd, NULL, true);
-            x = 0;
-          }
+          if (ch == ' ')  InvalidateRect(consoleWnd, NULL, true);
           if (ch <= '\r') {
             ++pasteCount;
             SetWindowText(GetConsoleWindow(), commName);  // typing: restore title after select
