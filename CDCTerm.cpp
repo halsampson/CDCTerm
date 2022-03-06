@@ -82,7 +82,8 @@ const char* lastActiveComPort() {
         if (RegEnumKeyEx(devKey, idx++, serNum, &len, NULL, NULL, NULL, &lastWritten)) break;
         if (CompareFileTime(&lastWritten, &latest) > 0 && CompareFileTime(&lastWritten, &prev) < 0) { // latest device connected
           latest = lastWritten;
-          if (strstr(devKeyName, "FTDIBUS")) strcat_s(serNum, sizeof(serNum), "\\0000"); // TODO: enumerate FTDI?
+          if (strstr(devKeyName, "FTDIBUS")) 
+            strcat_s(serNum, sizeof(serNum), "\\0000"); // TODO: enumerate FTDIBUS also
 
           len = sizeof(friendlyName);
           RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len);
@@ -176,7 +177,7 @@ int rxRdy(void) {
   DWORD commErrors;
   if (!ClearCommError(hCom, &commErrors, &cs)) return -1;
   if (commErrors)
-    printf("\n\rCommErr %X\n", commErrors); // 8 = framing (wrong baud rate); 2 = overrurn; 1 = overflow
+    printf("\n\rCommErr %X\n", commErrors); // 8 = framing (wrong baud rate); 2 = overrun; 1 = overflow
   return cs.cbInQue;
 }
 
@@ -222,6 +223,8 @@ bool EnableVTMode() { // Handle VT100 terminal sequences
 #define KEY_INSERT     82
 #define KEY_DELETE     83
 
+enum { off, minLSB, minMSB, maxLSB, maxMSB, binLSB, binMSB } binMode;
+
 void escapeKeys(unsigned char ch) {  // for TERM=vt100 
   switch (ch) { // VT100 Escape sequences 
     case KEY_UP:    ch = 'A'; break;
@@ -232,7 +235,10 @@ void escapeKeys(unsigned char ch) {  // for TERM=vt100
     case KEY_HOME:  ch = 'H'; break;
     case KEY_END:   ch = 'F'; break;
 
-    case 134: system("cls"); return;  // F12
+    case 134: // F12
+      binMode = off;
+      system("cls"); 
+      return;  
 
     default :
       switch (ch) {
@@ -278,7 +284,9 @@ int maxX, maxY;
 void processComms() {
   switch (rxRdy()) {
     case -1: throw "close";
-    case 0: break;
+    case 0: // no incoming comms
+      Sleep(50);
+      break;
     default:
       unsigned char buf[64 * 2 + 1]; // two USB buffers
       DWORD bytesRead;
@@ -286,7 +294,6 @@ void processComms() {
       buf[bytesRead] = 0;
 
       static int s, minADC, maxADC, x, binChs, binCh;
-      static enum {off, minLSB, minMSB, maxLSB, maxMSB, binLSB, binMSB} binMode;
       for (DWORD p = 0; p < bytesRead; ++p) {
         switch (binMode) {
           case off : 
@@ -396,7 +403,10 @@ int main(int argc, char** argv) {
 
           unsigned char ch = processKey();
           if (!ch)  break; // Escape seq
-          if (ch == ' ')  InvalidateRect(consoleWnd, NULL, true);
+          if (ch == ' ') {
+            binMode = off;
+            InvalidateRect(consoleWnd, NULL, true);
+          }
           if (ch <= '\r') {
             ++pasteCount;
             SetWindowText(GetConsoleWindow(), commName);  // typing: restore title after select
