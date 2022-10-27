@@ -2,7 +2,7 @@
 
 // Simple terminal which auto-(re)connects
 // defaults to last free USB COM port device connected
-// override with command line COMnn
+// override with command line [baud [COMnn]]
 // or run more instances to cycle through ports
 
 // TODO:
@@ -176,8 +176,11 @@ int rxRdy(void) {
   COMSTAT cs;
   DWORD commErrors;
   if (!ClearCommError(hCom, &commErrors, &cs)) return -1;
-  if (commErrors)
+  static DWORD lastCommErrors;
+  if (commErrors && commErrors != lastCommErrors) { // else annoying
+    lastCommErrors = commErrors;
     printf("\n\rCommErr %X\n", commErrors); // 8 = framing (wrong baud rate); 2 = overrun; 1 = overflow
+  }
   return cs.cbInQue;
 }
 
@@ -297,7 +300,7 @@ void processComms() {
       for (DWORD p = 0; p < bytesRead; ++p) {
         switch (binMode) {
           case off : 
-            if ((buf[p] & 0xF0) == 0xB0) {            
+            if (0 && (buf[p] & 0xF0) == 0xB0) {    // too easy to enter ***  TODO: require another mode character
               binChs = buf[p] & 0xF;
               binMode = minLSB;
               binCh = 0;
@@ -375,14 +378,14 @@ int main(int argc, char** argv) {
   SetConsoleCtrlHandler(CtrlHandler, TRUE);  // doesn't work when run under debugger
   EnableVTMode();
 
-  const char* comPort;
-  if (argc > 1)
-    comPort = argv[1];
-  else comPort = lastActiveComPort();
-
   int baudRate = 921600; // 115200   -- doesn't matter unless bridged
+  if (argc > 1)
+    baudRate = atoi(argv[1]);
+
+  const char* comPort;
   if (argc > 2)
-    baudRate = atoi(argv[2]);
+    comPort = argv[2];
+  else comPort = lastActiveComPort();
 
   while (!openSerial(comPort, baudRate))
     comPort = lastActiveComPort();
