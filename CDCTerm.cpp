@@ -2,7 +2,7 @@
 
 // Simple terminal which auto-(re)connects
 // defaults to last free USB COM port device connected
-// override with command line [baud [COMnn]]
+// override with command line [COMnn] [baud]
 // or run more instances to cycle through ports
 
 // TODO:
@@ -378,14 +378,20 @@ int main(int argc, char** argv) {
   SetConsoleCtrlHandler(CtrlHandler, TRUE);  // doesn't work when run under debugger
   EnableVTMode();
 
-  int baudRate = 921600; // 115200   -- doesn't matter unless bridged
-  if (argc > 1)
-    baudRate = atoi(argv[1]);
+  // args in any order "bbbbb" or "COMnn"
 
-  const char* comPort;
-  if (argc > 2)
-    comPort = argv[2];
-  else comPort = lastActiveComPort();
+  int baudRate = 921600; // 115200   -- doesn't matter unless bridged
+  const char* comPort = NULL;
+
+  for (int arg = 1; arg < argc; arg++) {
+    int val = atoi(argv[arg]);
+    if (val)
+      baudRate = val;
+    else comPort = argv[arg];
+  }
+
+  if (!comPort)
+    comPort = lastActiveComPort();  // "COMnn"
 
   while (!openSerial(comPort, baudRate))
     comPort = lastActiveComPort();
