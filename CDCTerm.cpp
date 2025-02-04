@@ -3,11 +3,12 @@
 // Simple terminal which auto-(re)connects
 // defaults to last free USB COM port device connected
 // override with command line [COMnn] [baud]
-// or run more instances to cycle through ports
+// or launch more instances to cycle through ports
 
 // TODO:
 //  backspace vs. Del 
 //  Alt key to switch ports (or run another instance)
+//  Esc seq to write line to CSV file
 
 #include <Windows.h>
 #include <stdio.h>
@@ -25,8 +26,7 @@ void handlerProc(DWORD control) {
   printf("Control %d\n", control);
 } 
 
-HANDLE registerForDeviceEvents() { 
-  
+HANDLE registerForDeviceEvents() {   
   // TODO: add rest of Microsoft service overcomplexity
   // CreateService();
   HANDLE hHandler = RegisterServiceCtrlHandler("USB Serial Hook", &handlerProc);  
@@ -82,15 +82,17 @@ const char* lastActiveComPort() {
         if (RegEnumKeyEx(devKey, idx++, serNum, &len, NULL, NULL, NULL, &lastWritten)) break;
         if (CompareFileTime(&lastWritten, &latest) > 0 && CompareFileTime(&lastWritten, &prev) < 0) { // latest device connected
           latest = lastWritten;
-          if (strstr(devKeyName, "FTDIBUS")) 
-            strcat_s(serNum, sizeof(serNum), "\\0000"); // TODO: enumerate FTDIBUS also
-
           len = sizeof(friendlyName);
-          RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len);
+          if (RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len) != ERROR_SUCCESS)
+            if (strstr(devKeyName, "FTDIBUS")) {
+              strcat_s(serNum, sizeof(serNum), "\\0000");
+              RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len);
+            }
 
           strcat_s(serNum, sizeof(serNum), "\\Device Parameters");
           len = sizeof(comPortName);
-          RegGetValue(devKey, serNum, "PortName", RRF_RT_REG_SZ, NULL, comPortName, &len);          
+          RegGetValue(devKey, serNum, "PortName", RRF_RT_REG_SZ, NULL, comPortName, &len);
+
           // SetupDiGetDeviceRegistryProperty(hDevInfo, &DeviceInfoData, SPDRP_FRIENDLYNAME, NULL, (BYTE*)devName, sizeof(devName), NULL);        
         }
       }
@@ -134,11 +136,13 @@ HANDLE openSerial(const char* portName, int baudRate = 921600) {
 
 #if 1
   dcb.BaudRate = baudRate;
-  // PL2303HX:  Divisor = 12 * 1000 * 1000 * 32 / baud --> 12M, 6M, 3M, 2457600, 1228800, 921600, ... baud
-  // FTDI 3 MHz / (n + 0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875; where n is an integer between 2 and 16384)
-  // Note: special cases n = 0 -> 3 MBaud; n = 1 -> 2 MBaud; Sub-integer divisors between 0 and 2 not allowed.
-  // CP2102N: 24 MHz / N
-  // CH340: 3, 2, 1.5, 1.2, 1M
+ 	// CP2104 24 MHz / N 
+  // FTDI   3MHz, 2MHz, then 24 MHz / N for N >= 16
+	// PL2303HX: 12 MHz * 32 / prescale / {1..255} > 115200
+     // https://elixir.bootlin.com/linux/v3.10/source/drivers/usb/serial/pl2303.c#L364
+  // CP2102: 24 MHz / N >= 8 from 32 entry programmable table   1 MHz max?
+	// CH340:  12 MHz / {1, 2, 8, 16, 64, 128, 512, 1024} / {2..256 or 9..256 when prescale = 1}
+    // https://github.com/nospam2000/ch341-baudrate-calculation
 
   dcb.ByteSize = DATABITS_8;
   dcb.StopBits = 0; // STOPBITS_10;   // BUG in SetCommState or VCP??
@@ -179,7 +183,7 @@ int rxRdy(void) {
   static DWORD lastCommErrors;
   if (commErrors && commErrors != lastCommErrors) { // else annoying
     lastCommErrors = commErrors;
-    printf("\n\rCommErr %X\n", commErrors); // 8 = framing (wrong baud rate); 2 = overrun; 1 = overflow
+    printf("\n\rCommErr %X\n", commErrors); // 16 = CE_BREAK; 8 = framing (wrong baud rate); 2 = overrun; 1 = overflow  
   }
   return cs.cbInQue;
 }
@@ -226,6 +230,8 @@ bool EnableVTMode() { // Handle VT100 terminal sequences
 #define KEY_INSERT     82
 #define KEY_DELETE     83
 
+#define KEY_F12       134
+
 enum { off, minLSB, minMSB, maxLSB, maxMSB, binLSB, binMSB } binMode;
 
 void escapeKeys(unsigned char ch) {  // for TERM=vt100 
@@ -238,7 +244,7 @@ void escapeKeys(unsigned char ch) {  // for TERM=vt100
     case KEY_HOME:  ch = 'H'; break;
     case KEY_END:   ch = 'F'; break;
 
-    case 134: // F12
+    case KEY_F12:
       binMode = off;
       system("cls"); 
       return;  
@@ -411,10 +417,10 @@ int main(int argc, char** argv) {
           maxY = rect.bottom;
 
           unsigned char ch = processKey();
-          if (!ch)  break; // Escape seq
+          if (!ch) break; // Escape seq
           if (ch == ' ') {
             binMode = off;
-            InvalidateRect(consoleWnd, NULL, true);
+            InvalidateRect(consoleWnd, NULL, true); // clear plot
           }
           if (ch <= '\r') {
             ++pasteCount;
