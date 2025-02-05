@@ -45,7 +45,6 @@ HANDLE registerForDeviceEvents() {
 }
 #endif
 
-
 FILETIME prev = {MAXDWORD, MAXDWORD};
 
 char friendlyName[128], commName[128];
@@ -68,7 +67,7 @@ const char* lastActiveComPort() {
     if ((truncate = strstr(hardwareID, "&REV"))) *truncate = 0;
     if ((truncate = strstr(hardwareID, "\\COMPORT"))) *truncate = 0;  // FTDI 
     if (strstr(hardwareID, "VID_1CBE")) 
-      strcat_s(hardwareID, sizeof(hardwareID), "&MI_00"); // Stellaris
+      strcat_s(hardwareID, sizeof(hardwareID), "&MI_00"); // Stellaris  TODO: or MI_01, ...
 
     char devKeyName[256] = "System\\CurrentControlSet\\Enum\\";
     strcat_s(devKeyName, sizeof(devKeyName), hardwareID);
@@ -80,15 +79,39 @@ const char* lastActiveComPort() {
         char serNum[64]; DWORD len = sizeof(serNum);
         FILETIME lastWritten = { 0 }; // 100 ns
         if (RegEnumKeyEx(devKey, idx++, serNum, &len, NULL, NULL, NULL, &lastWritten)) break;
+
+        if (strstr(devKeyName, "FTDIBUS")) {          
+         
+#if 1  // Use time stamp from HKLM SYSTEM\CurrentControlSet\Enum\USB\VID_nnnn&PID_nnnn\<Serial#>
+          char sKeyName[256] = "SYSTEM\\CurrentControlSet\\Enum\\USB\\";
+          strcat_s(sKeyName, sizeof sKeyName, serNum);
+          *strchr(sKeyName, '+') = '&';
+          *strrchr(sKeyName, '+') = '\\';
+          if (sKeyName[strlen(sKeyName) - 1] == 'A')
+            *strrchr(sKeyName, 'A') = 0;
+          
+          HKEY usbKey;
+          LSTATUS ls = RegOpenKey(HKEY_LOCAL_MACHINE, sKeyName, &usbKey);
+          ls |= RegQueryInfoKey(usbKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &lastWritten);
+          RegCloseKey(usbKey);
+#else
+          char devParmName[256];
+          strcpy_s(devParmName, sizeof devParmName, serNum);
+          strcat_s(devParmName, sizeof devParmName, "\\Properties");
+          HKEY devParmKey;
+          LSTATUS ls = RegOpenKey(devKey, serNum, &devParmKey);
+          ls |= RegQueryInfoKey(devParmKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &lastWritten);
+          RegCloseKey(devParmKey);
+#endif
+          strcat_s(serNum, sizeof(serNum), "\\0000");
+        }
+
         if (CompareFileTime(&lastWritten, &latest) > 0 && CompareFileTime(&lastWritten, &prev) < 0) { // latest device connected
           latest = lastWritten;
           len = sizeof(friendlyName);
-          if (RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len) != ERROR_SUCCESS)
-            if (strstr(devKeyName, "FTDIBUS")) {
-              strcat_s(serNum, sizeof(serNum), "\\0000");
-              RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len);
-            }
-
+          RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len);
+          // printf("  %s\t%08X%08X\n", friendlyName, lastWritten.dwHighDateTime, lastWritten.dwLowDateTime);
+          
           strcat_s(serNum, sizeof(serNum), "\\Device Parameters");
           len = sizeof(comPortName);
           RegGetValue(devKey, serNum, "PortName", RRF_RT_REG_SZ, NULL, comPortName, &len);
@@ -176,14 +199,20 @@ HANDLE openSerial(const char* portName, int baudRate = 921600) {
   return hCom;
 }
 
-int rxRdy(void) {
+int rxRdy(bool breakExpected = false) {
   COMSTAT cs;
   DWORD commErrors;
   if (!ClearCommError(hCom, &commErrors, &cs)) return -1;
   static DWORD lastCommErrors;
   if (commErrors && commErrors != lastCommErrors) { // else annoying
     lastCommErrors = commErrors;
-    printf("\n\rCommErr %X\n", commErrors); // 16 = CE_BREAK; 8 = framing (wrong baud rate); 2 = overrun; 1 = overflow  
+    switch (commErrors) {
+      case CE_OVERRUN: printf("Overrun\n"); break;
+		  case CE_FRAME:   printf("Frame\n");	break;
+		  case CE_BREAK:
+		  case CE_BREAK | CE_FRAME:	if (!breakExpected) printf("Break\n"); break;
+		  default: printf("CommErr %X\n", commErrors); break;  // combos
+	  }
   }
   return cs.cbInQue;
 }
@@ -403,6 +432,8 @@ int main(int argc, char** argv) {
     comPort = lastActiveComPort();
 
   if (hCom <= (HANDLE)0) exit(-1);
+
+  rxRdy(true); // clear connect errors
 
   SetWindowText(GetConsoleWindow(), commName);
   printf("\nConnected to %s\n", commName);

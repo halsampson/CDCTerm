@@ -14,6 +14,7 @@
 *.userprefs
 
 # Build results
+enc_temp_folder/
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/
