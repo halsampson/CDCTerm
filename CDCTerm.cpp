@@ -82,7 +82,7 @@ const char* lastActiveComPort() {
 
         if (strstr(devKeyName, "FTDIBUS")) {          
          
-#if 1  // Use time stamp from HKLM SYSTEM\CurrentControlSet\Enum\USB\VID_nnnn&PID_nnnn\<Serial#>
+#if 1  // Use time stamp from HKLM SYSTEM\CurrentControlSet\Enum\USB\VID_nnnn&PID_nnnn\<Serial#>   TODO: for others also; MI_nn ??
           char sKeyName[256] = "SYSTEM\\CurrentControlSet\\Enum\\USB\\";
           strcat_s(sKeyName, sizeof sKeyName, serNum);
           *strchr(sKeyName, '+') = '&';
@@ -186,7 +186,11 @@ HANDLE openSerial(const char* portName, int baudRate = 921600) {
 #endif  
 #endif
 
-  if (!SetCommState(hCom, &dcb)) {printf("Can't set baud\n"); }
+  if (!SetCommState(hCom, &dcb)) {
+    printf("%s: Can't set baud\n", portName); 
+		CloseHandle(hCom);
+    return NULL;
+  }
   if (!SetupComm(hCom, 16384, 16)) printf("Can't SetupComm\n"); // Set size of I/O buffers (max 16384 on Win7)
 
   // USB bulk packets arrive at 1 kHz rate
