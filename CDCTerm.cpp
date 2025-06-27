@@ -47,7 +47,7 @@ HANDLE registerForDeviceEvents() {
 
 FILETIME prev = {MAXDWORD, MAXDWORD};
 
-char friendlyName[128], commName[128];
+char friendlyName[128], commName[128], lastSerNum[64];
 
 const char* lastActiveComPort() {
   FILETIME latest = { 0 };
@@ -60,28 +60,29 @@ const char* lastActiveComPort() {
     if (!SetupDiEnumDeviceInfo(hDevInfo, index, &DeviceInfoData)) break;
 
     char hardwareID[256];
-    SetupDiGetDeviceRegistryProperty(hDevInfo, &DeviceInfoData, SPDRP_HARDWAREID, NULL, (BYTE*)hardwareID, sizeof(hardwareID), NULL);  
+    SetupDiGetDeviceRegistryProperty(hDevInfo, &DeviceInfoData, SPDRP_HARDWAREID, NULL, (BYTE*)hardwareID, sizeof(hardwareID), NULL);
 
     // truncate to make registry key for common USB CDC devices:
     char* truncate;
     if ((truncate = strstr(hardwareID, "&REV"))) *truncate = 0;
     if ((truncate = strstr(hardwareID, "\\COMPORT"))) *truncate = 0;  // FTDI 
-    if (strstr(hardwareID, "VID_1CBE")) 
+    if (strstr(hardwareID, "VID_1CBE"))
       strcat_s(hardwareID, sizeof(hardwareID), "&MI_00"); // Stellaris  TODO: or MI_01, ...
 
     char devKeyName[256] = "System\\CurrentControlSet\\Enum\\";
     strcat_s(devKeyName, sizeof(devKeyName), hardwareID);
     HKEY devKey = 0;
     LSTATUS res = RegOpenKeyEx(HKEY_LOCAL_MACHINE, devKeyName, 0, KEY_READ, &devKey);
-    if (devKey) {      
+    if (devKey) {
       DWORD idx = 0;
       while (1) {
-        char serNum[64]; DWORD len = sizeof(serNum);
+        char serNum[64];
+        DWORD len = sizeof(serNum);
         FILETIME lastWritten = { 0 }; // 100 ns
         if (RegEnumKeyEx(devKey, idx++, serNum, &len, NULL, NULL, NULL, &lastWritten)) break;
 
-        if (strstr(devKeyName, "FTDIBUS")) {          
-         
+        if (strstr(devKeyName, "FTDIBUS")) {
+
 #if 1  // Use time stamp from HKLM SYSTEM\CurrentControlSet\Enum\USB\VID_nnnn&PID_nnnn\<Serial#>   TODO: for others also; MI_nn ??
           char sKeyName[256] = "SYSTEM\\CurrentControlSet\\Enum\\USB\\";
           strcat_s(sKeyName, sizeof sKeyName, serNum);
@@ -89,7 +90,7 @@ const char* lastActiveComPort() {
           *strrchr(sKeyName, '+') = '\\';
           if (sKeyName[strlen(sKeyName) - 1] == 'A')
             *strrchr(sKeyName, 'A') = 0;
-          
+
           HKEY usbKey;
           LSTATUS ls = RegOpenKey(HKEY_LOCAL_MACHINE, sKeyName, &usbKey);
           ls |= RegQueryInfoKey(usbKey, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &lastWritten);
@@ -111,7 +112,8 @@ const char* lastActiveComPort() {
           len = sizeof(friendlyName);
           RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len);
           // printf("  %s\t%08X%08X\n", friendlyName, lastWritten.dwHighDateTime, lastWritten.dwLowDateTime);
-          
+					strcpy_s(lastSerNum, sizeof(lastSerNum), serNum);
+
           strcat_s(serNum, sizeof(serNum), "\\Device Parameters");
           len = sizeof(comPortName);
           RegGetValue(devKey, serNum, "PortName", RRF_RT_REG_SZ, NULL, comPortName, &len);
@@ -120,20 +122,28 @@ const char* lastActiveComPort() {
         }
       }
       RegCloseKey(devKey);
-    } else if (strstr(hardwareID, "USB")) printf("%s not found", devKeyName); // low numbered non-removable ports ignored
+    }
+    else if (strstr(hardwareID, "USB")) printf("%s not found", devKeyName); // low numbered non-removable ports ignored
   }
 
   prev = latest;
   SetupDiDestroyDeviceInfoList(hDevInfo);
 
+  commName[0] = 0; // empty
+
+  if (isalpha(lastSerNum[0])) {
+    strcpy_s(commName, sizeof(commName), lastSerNum);
+    strcat_s(commName, sizeof(commName), " ");
+  } 
+
   // move COMxx to start of friendlyName
   char* comPort = strchr(friendlyName, '(');
   if (comPort) {
-    strcpy_s(commName, sizeof(commName), comPort+1);
+    strcat_s(commName, sizeof(commName), comPort+1);
     *strchr(commName, ')') = ' ';
     strcat_s(commName, sizeof(commName), friendlyName);
     *(strchr(commName, '(') - 1) = 0;
-  } else strcpy_s(commName, sizeof(commName), friendlyName);
+  } else strcat_s(commName, sizeof(commName), friendlyName);
 
   return comPortName;
 
@@ -163,8 +173,8 @@ HANDLE openSerial(const char* portName, int baudRate = 921600) {
   // FTDI   3MHz, 2MHz, then 24 MHz / N for N >= 16
 	// PL2303HX: 12 MHz * 32 / prescale / {1..255} > 115200
      // https://elixir.bootlin.com/linux/v3.10/source/drivers/usb/serial/pl2303.c#L364
-  // CP2102: 24 MHz / N >= 8 from 32 entry programmable table   1 MHz max?
-	// CH340:  12 MHz / {1, 2, 8, 16, 64, 128, 512, 1024} / {2..256 or 9..256 when prescale = 1}
+	// CP2102: 24 MHz / N >= 8 from 32 entry programmable table  3M baud works using alias table
+	// CH340:  12 MHz / {1, 2, 8, 16, 64, 128, 512, 1024 prescale} / {2..256 or 9..256 when prescale = 1}  max = 12/2/2 = 3M baud
     // https://github.com/nospam2000/ch341-baudrate-calculation
 
   dcb.ByteSize = DATABITS_8;
