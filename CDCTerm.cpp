@@ -47,12 +47,14 @@ HANDLE registerForDeviceEvents() {
 
 FILETIME prev = {MAXDWORD, MAXDWORD};
 
-char friendlyName[128], commName[128], lastSerNum[64];
+char serialName[32];
+char comPortName[8] = "none", friendlyName[128], commName[128], lastSerNum[64];
 
-const char* lastActiveComPort() {
+HDEVINFO hDevInfo;
+
+void findLatestOrMatchingComPort() {
   FILETIME latest = { 0 };
-  static char comPortName[8] = "none";
-  HDEVINFO hDevInfo = SetupDiGetClassDevs(&GUID_CLASS_COMPORT, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+  hDevInfo = SetupDiGetClassDevs(&GUID_CLASS_COMPORT, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
 
   for (int index = 0; ; index++) {
     SP_DEVINFO_DATA DeviceInfoData;
@@ -105,19 +107,24 @@ const char* lastActiveComPort() {
           RegCloseKey(devParmKey);
 #endif
           strcat_s(serNum, sizeof(serNum), "\\0000");
-        }
+        }  
 
-        if (CompareFileTime(&lastWritten, &latest) > 0 && CompareFileTime(&lastWritten, &prev) < 0) { // latest device connected
+        len = sizeof(friendlyName);
+        RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len);
+        // printf("  %s\t%08X%08X\n", friendlyName, lastWritten.dwHighDateTime, lastWritten.dwLowDateTime);
+  			strcpy_s(lastSerNum, sizeof(lastSerNum), serNum);
+        strcat_s(serNum, sizeof(serNum), "\\Device Parameters");   // serial string
+
+        if (serialName[0]) {
+          if (strstr(lastSerNum, serialName)) { // match serial name
+            len = sizeof(comPortName);
+            RegGetValue(devKey, serNum, "PortName", RRF_RT_REG_SZ, NULL, comPortName, &len);
+            return;
+					}
+        } else if (CompareFileTime(&lastWritten, &latest) > 0 && CompareFileTime(&lastWritten, &prev) < 0) { // latest device connected
           latest = lastWritten;
-          len = sizeof(friendlyName);
-          RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len);
-          // printf("  %s\t%08X%08X\n", friendlyName, lastWritten.dwHighDateTime, lastWritten.dwLowDateTime);
-					strcpy_s(lastSerNum, sizeof(lastSerNum), serNum);
-
-          strcat_s(serNum, sizeof(serNum), "\\Device Parameters");
           len = sizeof(comPortName);
           RegGetValue(devKey, serNum, "PortName", RRF_RT_REG_SZ, NULL, comPortName, &len);
-
           // SetupDiGetDeviceRegistryProperty(hDevInfo, &DeviceInfoData, SPDRP_FRIENDLYNAME, NULL, (BYTE*)devName, sizeof(devName), NULL);        
         }
       }
@@ -125,8 +132,12 @@ const char* lastActiveComPort() {
     }
     else if (strstr(hardwareID, "USB")) printf("%s not found", devKeyName); // low numbered non-removable ports ignored
   }
-
   prev = latest;
+}
+
+const char* lastActiveComPort() {
+	findLatestOrMatchingComPort();
+
   SetupDiDestroyDeviceInfoList(hDevInfo);
 
   commName[0] = 0; // empty
@@ -427,16 +438,18 @@ int main(int argc, char** argv) {
   SetConsoleCtrlHandler(CtrlHandler, TRUE);  // doesn't work when run under debugger
   EnableVTMode();
 
-  // args in any order "bbbbb" or "COMnn"
+  // args in any order <baud rate>,  "COMnn" or <serial string
 
-  int baudRate = 921600; // 115200   -- doesn't matter unless bridged
+  int baudRate = 2000000; // doesn't matter unless bridged
   const char* comPort = NULL;
 
   for (int arg = 1; arg < argc; arg++) {
     int val = atoi(argv[arg]);
     if (val)
       baudRate = val;
-    else comPort = argv[arg];
+    else if (strstr(argv[arg], "COM"))
+      comPort = argv[arg];
+		else strcpy_s(serialName, sizeof(serialName), argv[arg]);
   }
 
   if (!comPort)
