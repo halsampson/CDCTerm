@@ -48,7 +48,20 @@ HANDLE registerForDeviceEvents() {
 FILETIME prev = {MAXDWORD, MAXDWORD};
 
 char serialName[32];
-char comPortName[8] = "none", friendlyName[128], commName[128], lastSerNum[64];
+char comPortName[8] = "none", friendlyName[128], commName[128], lastSerNum[64], serNum[64];
+
+void getSerNum(HKEY devKey) {
+  DWORD len = sizeof(friendlyName);
+  RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len);
+  // printf("  %s\t%08X%08X\n", friendlyName, lastWritten.dwHighDateTime, lastWritten.dwLowDateTime);
+  strcpy_s(lastSerNum, sizeof(lastSerNum), serNum);
+  strcat_s(serNum, sizeof(serNum), "\\Device Parameters");   // serial string
+}
+
+void getPortName(HKEY devKey) {
+  DWORD len = sizeof(comPortName);
+  RegGetValue(devKey, serNum, "PortName", RRF_RT_REG_SZ, NULL, comPortName, &len);
+}
 
 HDEVINFO hDevInfo;
 
@@ -78,9 +91,8 @@ void findLatestOrMatchingComPort() {
     if (devKey) {
       DWORD idx = 0;
       while (1) {
-        char serNum[64];
-        DWORD len = sizeof(serNum);
         FILETIME lastWritten = { 0 }; // 100 ns
+				DWORD len = sizeof(serNum);
         if (RegEnumKeyEx(devKey, idx++, serNum, &len, NULL, NULL, NULL, &lastWritten)) break;
 
         if (strstr(devKeyName, "FTDIBUS")) {
@@ -109,22 +121,18 @@ void findLatestOrMatchingComPort() {
           strcat_s(serNum, sizeof(serNum), "\\0000");
         }  
 
-        len = sizeof(friendlyName);
-        RegGetValue(devKey, serNum, "FriendlyName", RRF_RT_REG_SZ, NULL, friendlyName, &len);
-        // printf("  %s\t%08X%08X\n", friendlyName, lastWritten.dwHighDateTime, lastWritten.dwLowDateTime);
-  			strcpy_s(lastSerNum, sizeof(lastSerNum), serNum);
-        strcat_s(serNum, sizeof(serNum), "\\Device Parameters");   // serial string
+        if (serialName[0]) {   
+          getSerNum(devKey);
 
-        if (serialName[0]) {
+
           if (strstr(lastSerNum, serialName)) { // match serial name
-            len = sizeof(comPortName);
-            RegGetValue(devKey, serNum, "PortName", RRF_RT_REG_SZ, NULL, comPortName, &len);
+            getPortName(devKey);
             return;
 					}
-        } else if (CompareFileTime(&lastWritten, &latest) > 0 && CompareFileTime(&lastWritten, &prev) < 0) { // latest device connected
+        } else if (CompareFileTime(&lastWritten, &latest) > 0 && CompareFileTime(&lastWritten, &prev) < 0) { // latest device connected          
           latest = lastWritten;
-          len = sizeof(comPortName);
-          RegGetValue(devKey, serNum, "PortName", RRF_RT_REG_SZ, NULL, comPortName, &len);
+          getSerNum(devKey);
+          getPortName(devKey);
           // SetupDiGetDeviceRegistryProperty(hDevInfo, &DeviceInfoData, SPDRP_FRIENDLYNAME, NULL, (BYTE*)devName, sizeof(devName), NULL);        
         }
       }
