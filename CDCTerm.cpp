@@ -455,9 +455,10 @@ int main(int argc, char** argv) {
     int val = atoi(argv[arg]);
     if (val)
       baudRate = val;
-    else if (strstr(argv[arg], "COM"))
+    else if (strstr(argv[arg], "COM")) {
       comPort = argv[arg];
-		else strcpy_s(serialName, sizeof(serialName), argv[arg]);
+      strcpy_s(commName, sizeof commName, comPort);
+    } else strcpy_s(serialName, sizeof(serialName), argv[arg]);  // to  search
   }
 
   if (!comPort)
