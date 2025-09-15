@@ -498,8 +498,16 @@ int main(int argc, char** argv) {
             // pasting, not typing; process line at a time for speed -> Must CR at end of pasted text!!!
             if (pasteCount++ == 2) setInputEcho(false);
             char buf[64 * 2 + 1]; // two USB buffers
-            fgets(buf, sizeof(buf)-1, stdin); // to buffer or newline  
+            fgets(buf, sizeof(buf)-1, stdin); // to buffer or newline 
             DWORD len = (DWORD)strlen(buf);
+
+            // translate !CR LF to CR LF for paste to Linux
+            if (len >= 2 && buf[len - 2] != '\r' && buf[len - 1] == '\n') {
+              ++len;
+              buf[len - 2] = '\r';
+              buf[len - 1] = '\n';
+						}
+            
             if (!WriteFile(hCom, buf, len, NULL, NULL)) throw "close";
             processComms();
           }
