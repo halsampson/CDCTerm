@@ -6,9 +6,13 @@
 // or launch more instances to cycle through ports
 
 // TODO:
+//  close handle on any exit
+//  fix Serial#e: Win11 COM5 only!
 //  backspace vs. Del 
 //  Alt key to switch ports (or run another instance)
 //  Esc seq to write line to CSV file
+
+#define _CRT_SECURE_NO_WARNINGS
 
 #include <Windows.h>
 #include <stdio.h>
@@ -439,12 +443,7 @@ int main(int argc, char** argv) {
   printf("watching...");
 #endif
 
-  HWND consoleWnd = GetConsoleWindow();
-  plot = GetDC(consoleWnd);
-  RECT rect;
 
-  SetConsoleCtrlHandler(CtrlHandler, TRUE);  // doesn't work when run under debugger
-  EnableVTMode();
 
   // args in any order <baud rate>,  "COMnn" or <serial string
 
@@ -471,8 +470,32 @@ int main(int argc, char** argv) {
 
   rxRdy(true); // clear connect errors
 
-  SetWindowText(GetConsoleWindow(), commName);
-  printf("\nConnected to %s\n", commName);
+  // shorten commName for title -- TODO: fix commNames
+  char* p = strstr(commName, "USB-SERIAL");
+  if (p) strcpy(p, p + 11);
+  p = strstr(commName, " USB Serial Port");
+  if (p) *p = 0;
+  p = strstr(commName, "Silicon Labs");
+  if (p) strcpy(p, p + 13);
+  p = strstr(commName, " USB to UART Bridge");
+  if (p) *p = 0;
+  p = strrchr(commName, '&');
+  if (p) strcpy(commName, p + 3);
+  p = strrchr(commName, '+');
+  if (p) strcpy(commName, p + 1);
+  p = strstr(commName, "A\\0000");
+  if (p) strcpy(p, p + 6);
+
+  printf("Connected to %s\n", commName);
+  SetConsoleTitle(commName);
+  Sleep(40);  
+  HWND consoleWnd = FindWindow(NULL, commName);
+
+  plot = GetDC(consoleWnd);
+  RECT rect;
+
+  SetConsoleCtrlHandler(CtrlHandler, TRUE);  // doesn't work when run under debugger
+  EnableVTMode();
 
   while (1) {
     try {
@@ -497,12 +520,13 @@ int main(int argc, char** argv) {
           while (pasteCount >= 2 && _kbhit()) { 
             // pasting, not typing; process line at a time for speed -> Must CR at end of pasted text!!!
             if (pasteCount++ == 2) setInputEcho(false);
-            char buf[64 * 2 + 1]; // two USB buffers
-            fgets(buf, sizeof(buf)-1, stdin); // to buffer or newline 
+            char buf[64 * 2 + 1]; // 2 USB buffers
+						fgets(buf, sizeof(buf) - 1, stdin); // to buffer or newline;  
             DWORD len = (DWORD)strlen(buf);
 
-            // translate !CR LF to CR LF for paste to Linux
-            if (len >= 2 && buf[len - 2] != '\r' && buf[len - 1] == '\n') {
+            // LFs from Notepad++ paste are removed somewhere (but paste OK to WordPad)!!   WHY??
+            // translate !CR LF to CR LF for paste to Linux??
+            if (0 && len >= 2 && buf[len - 2] != '\r' && buf[len - 1] == '\n') {
               ++len;
               buf[len - 2] = '\r';
               buf[len - 1] = '\n';
